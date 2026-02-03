@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package proto;
+
+// The option for Go code generation
+option go_package = "github.com/KioskDetonator/AniScale/proto";
+
+// Data structure representing a manga update
+message MangaUpdate {
+  string title = 1;
+  string chapter = 2;
+  string url = 3;
+}
+
+// Service defining how the Notifier receives data
+service Notifier {
+  // A simple RPC: Scraper sends an update, Notifier sends a response
+  rpc SendNotification(MangaUpdate) returns (NotificationResponse);
+}
+
+// Response message from the Notifier
+message NotificationResponse {
+  bool success = 1;
+  string message = 2;
+}
