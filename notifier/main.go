@@ -1,48 +1,78 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
-	"net"
+	"net/http"
+	"os"
 
-	// Replace 'your-username' with your actual GitHub username
-	pb "github.com/KioskDetonator/AniScale/proto"
-	"google.golang.org/grpc"
+	"cloud.google.com/go/pubsub"
+	"google.golang.org/api/option"
 )
 
-// server is used to implement proto.NotifierServer
-type server struct {
-	pb.UnimplementedNotifierServer
+// The same structure as the Scraper
+type MangaUpdate struct {
+	Title   string `json:"title"`
+	Chapter string `json:"chapter"`
+	Url     string `json:"url"`
 }
 
-// SendNotification implements proto.NotifierServer
-func (s *server) SendNotification(ctx context.Context, in *pb.MangaUpdate) (*pb.NotificationResponse, error) {
-	log.Printf("Received Manga Update: %s (Chapter %s) - URL: %s", in.GetTitle(), in.GetChapter(), in.GetUrl())
-	
-	// For now, we just return a successful response
-	return &pb.NotificationResponse{
-		Success: true, 
-		Message: "Notification received and logged!",
-	}, nil
+var discordWebhookURL = os.Getenv("DISCORD_WEBHOOK_URL")
+
+func sendToDiscord(u MangaUpdate) error {
+	msg := map[string]string{
+		"content": fmt.Sprintf("📢 **New Manga Update!**\n**%s** - Chapter %s\nRead here: %s", u.Title, u.Chapter, u.Url),
+	}
+	body, _ := json.Marshal(msg)
+
+	resp, err := http.Post(discordWebhookURL, "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
 }
 
 func main() {
-	// 1. Create a TCP listener on port 50051
-	lis, err := net.Listen("tcp", ":50051")
+	ctx := context.Background()
+	projectID := os.Getenv("GCP_PROJECT_ID")
+
+	// 1. Setup the Client using the same key file
+	client, err := pubsub.NewClient(ctx, projectID, option.WithCredentialsFile("aniscale-key.json"))
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	// 2. Create a new gRPC server instance
-	s := grpc.NewServer()
+	// 2. Point to your subscription
+	sub := client.Subscription("notifier-sub")
 
-	// 3. Register our service implementation with the server
-	pb.RegisterNotifierServer(s, &server{})
+	log.Println("📥 Notifier is waiting for Pub/Sub messages...")
 
-	log.Printf("Notifier server listening at %v", lis.Addr())
+	// 3. Receive messages indefinitely
+	err = sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
+		var update MangaUpdate
+		if err := json.Unmarshal(msg.Data, &update); err != nil {
+			log.Printf("Could not decode message: %v", err)
+			msg.Ack() // Ack anyway to remove bad message from queue
+			return
+		}
 
-	// 4. Start serving requests
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		log.Printf("Processing: %s", update.Title)
+
+		// 4. Send to Discord
+		if err := sendToDiscord(update); err != nil {
+			log.Printf("Discord error: %v", err)
+			msg.Nack() // Nack means "I failed, try again later"
+		} else {
+			log.Printf("Successfully notified Discord for %s", update.Title)
+			msg.Ack() // Ack means "Success, delete message from cloud"
+		}
+	})
+
+	if err != nil {
+		log.Fatalf("Subscription error: %v", err)
 	}
 }

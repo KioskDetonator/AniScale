@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aniscale-notifier
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notifier
+  template:
+    metadata:
+      labels:
+        app: notifier
+    spec:
+      containers:
+      - name: notifier
+        image: us-central1-docker.pkg.dev/aniscale/aniscale-repo/notifier:v1
+        env:
+        - name: GCP_PROJECT_ID
+          valueFrom:
+            secretKeyRef:
+              name: aniscale-secrets
+              key: GCP_PROJECT_ID
+        - name: DISCORD_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: aniscale-secrets
+              key: DISCORD_WEBHOOK_URL
+        volumeMounts:
+        - name: google-cloud-key
+          mountPath: /root/aniscale-key.json
+          subPath: aniscale-key.json
+      volumes:
+      - name: google-cloud-key
+        secret:
+          secretName: aniscale-secrets # Now pointing to your main secrets file
+          items:
+          - key: aniscale-key.json
+            path: aniscale-key.json

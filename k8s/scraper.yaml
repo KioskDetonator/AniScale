@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aniscale-scraper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scraper
+  template:
+    metadata:
+      labels:
+        app: scraper
+    spec:
+      containers:
+      - name: scraper
+        image: us-central1-docker.pkg.dev/aniscale/aniscale-repo/scraper:v1
+        env:
+        - name: GCP_PROJECT_ID
+          valueFrom:
+            secretKeyRef:
+              name: aniscale-secrets
+              key: GCP_PROJECT_ID
+        # This tells Go where to find the key
+        volumeMounts:
+        - name: google-cloud-key
+          mountPath: /root/aniscale-key.json
+          subPath: aniscale-key.json
+      volumes:
+      - name: google-cloud-key
+        secret:
+          secretName: aniscale-secrets # Now pointing to your main secrets file
+          items:
+          - key: aniscale-key.json
+            path: aniscale-key.json
